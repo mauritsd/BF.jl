@@ -54,25 +54,44 @@ function _construct_body_expr(program)
             # Append the expression to the body.
             body_expr.args = [body_expr.args; dec_expr.args]
         elseif op == '<'
+            subprogram = program[n:end]
+            num_dp_lefts = _scan_num_ops(subprogram, '<')
+            skip_until = n + num_dp_lefts - 1
+
             dp_left_expr = quote
-                if dp == 1
-                    unshift!(a, 0)
-                    l += 1
-                else
-                    dp -= 1
+                heap_exceeded = -(dp - $num_dp_lefts - 1)
+
+                if heap_exceeded > 0
+                    for n in 1:heap_exceeded
+                        unshift!(a, 0)
+                    end
+                    l += heap_exceeded
+                end
+
+                dp -= $num_dp_lefts
+                if dp < 1
+                    dp = 1
                 end
             end
 
             # Append the expression to the body.
             body_expr.args = [body_expr.args; dp_left_expr.args]
         elseif op == '>'
+            subprogram = program[n:end]
+            num_dp_rights = _scan_num_ops(subprogram, '>')
+            skip_until = n + num_dp_rights - 1
+
             dp_right_expr = quote
-                if dp == l
-                    push!(a, 0)
-                    l += 1
+                heap_exceeded = dp + $num_dp_rights - l
+
+                if heap_exceeded > 0
+                    for x in 1:heap_exceeded
+                        push!(a, 0)
+                    end
+                    l += heap_exceeded
                 end
 
-                dp += 1
+                dp += $num_dp_rights
             end
 
             # Append the expression to the body.
