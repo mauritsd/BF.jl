@@ -1,38 +1,15 @@
 using ArgParse
 
-# Main function. Execution starts here.
-function main()
-    # Parse arguments. No fancy options yet.
-    s = ArgParseSettings()
-    @add_arg_table s begin
-        "input"
-            help = "input file holding brainfuck source to run"
-            required = true
-    end
-    args = parse_args(ARGS, s)
-
-    # Read program from the input file.
-    input_file = open(args["input"])
-    program = readall(input_file)
-    close(input_file)
-
-    # Perform the brainfuck-to-julia translation.
-    body_expr = _construct_body_expr(program)
-    fun_expr = _construct_function(body_expr)
-
-    # Evaluate the function, resulting in its JIT compilation.
-    eval(fun_expr)
-
-    # Run the brainfuck program.
-    _bf()
-end
-
 # Simple wrapper to insert our translated brainfuck code into a Julia function
-# that defines the heap (a) and the data pointer (dp).
+# that defines the heap (a), heap size (l) and the data pointer (dp).
 function _construct_function(body_expr)
     fun_expr = quote
         function _bf()
+            # Heap
             a = Char[0]
+            # Heap size
+            l = 1
+            # Data pointer
             dp = 1
 
             $body_expr
@@ -49,22 +26,29 @@ function _construct_body_expr(program)
     skip_until = 0
 
     for (n, op) in enumerate(program)
-        # Skip operations up to and including a closing bracket if we read
-        # an opening bracket before.
+        # Skip operations up to and including the requested operation.
         if n <= skip_until
             continue
         end
 
         if op == '+'
+            subprogram = program[n:end]
+            num_incs = _scan_num_ops(subprogram, '+')
+            skip_until = n + num_incs - 1
+
             inc_expr = quote
-                a[dp] += 1
+                a[dp] += $num_incs
             end
 
             # Append the expression to the body.
             body_expr.args = [body_expr.args; inc_expr.args]
         elseif op == '-'
+            subprogram = program[n:end]
+            num_decs = _scan_num_ops(subprogram, '-')
+            skip_until = n + num_decs - 1
+
             dec_expr = quote
-                a[dp] -= 1
+                a[dp] -= $num_decs
             end
 
             # Append the expression to the body.
@@ -73,6 +57,7 @@ function _construct_body_expr(program)
             dp_left_expr = quote
                 if dp == 1
                     unshift!(a, 0)
+                    l += 1
                 else
                     dp -= 1
                 end
@@ -82,8 +67,9 @@ function _construct_body_expr(program)
             body_expr.args = [body_expr.args; dp_left_expr.args]
         elseif op == '>'
             dp_right_expr = quote
-                if dp == length(a)
+                if dp == l
                     push!(a, 0)
+                    l += 1
                 end
 
                 dp += 1
@@ -156,6 +142,52 @@ function _construct_body_expr(program)
     end
 
     body_expr
+end
+
+_all_ops = Set(['+', '-', '<', '>', '[', ']', '.', ','])
+
+function _scan_num_ops(program, search_op)
+    count_ = 0
+    for (n, op) in enumerate(program)
+        if op == search_op
+            count_ += 1
+        elseif op in _all_ops
+            break
+        end
+    end
+
+    if count_ == 0
+        error("subprogram should start with the requested operation!")
+    end
+
+    count_
+end
+
+# Main function. Execution starts here.
+function main()
+    # Parse arguments. No fancy options yet.
+    s = ArgParseSettings()
+    @add_arg_table s begin
+        "input"
+            help = "input file holding brainfuck source to run"
+            required = true
+    end
+    args = parse_args(ARGS, s)
+
+    # Read program from the input file.
+    input_file = open(args["input"])
+    program = readall(input_file)
+    close(input_file)
+
+    # Perform the brainfuck-to-julia translation.
+    body_expr = _construct_body_expr(program)
+    fun_expr = _construct_function(body_expr)
+
+    # Evaluate the function, resulting in its JIT compilation.
+    eval(fun_expr)
+
+    # Run the brainfuck program.
+    _bf()
 end
 
 # Start at the main function.
